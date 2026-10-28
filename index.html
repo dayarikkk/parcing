@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Разведка: поиск клиентов для ботов</title>
+<style>
+:root{--bg:#14161a;--panel:#1b1e24;--card:#20242b;--line:#2d323b;--tx:#e8e6e1;--mut:#8b919c;--ac:#5ec2a6;--warn:#e5b25d;--bad:#e06c6c;color-scheme:dark}
+@media (prefers-color-scheme:light){:root{--bg:#f3f2ee;--panel:#fff;--card:#fff;--line:#d9d6cf;--tx:#1d1f23;--mut:#6a6f78;--ac:#0f7b63;--warn:#9a6a10;--bad:#b3362f;color-scheme:light}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 "Segoe UI",system-ui,sans-serif;display:grid;grid-template-columns:340px 1fr;padding-top:env(safe-area-inset-top,0)}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:16px;overflow:auto;height:100vh}
+main{padding:16px;overflow:auto;height:100vh}
+h1{font-size:18px;margin:0 0 4px}
+h2{font-size:13px;margin:18px 0 6px;color:var(--mut);font-weight:600}
+p.hint{color:var(--mut);margin:0 0 8px;font-size:12px}
+input,select,textarea,button{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+input,textarea,select{width:100%}
+textarea{resize:vertical;min-height:90px}
+button{cursor:pointer;background:var(--card)}
+button:hover{border-color:var(--ac)}
+button.pri{background:var(--ac);color:#0b1511;border-color:var(--ac);font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid var(--ac);outline-offset:1px}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border-radius:99px;padding:4px 10px;font-size:12px;cursor:pointer;user-select:none}
+.chip.on{background:var(--ac);color:#0b1511;border-color:var(--ac)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;position:sticky;top:-16px;background:var(--bg);padding:8px 0;z-index:2}
+.bar>*{width:auto}
+.bar input{min-width:200px;flex:1}
+#status{color:var(--mut);margin:0 0 10px;min-height:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.card h3{margin:0;font-size:15px}
+.meta{color:var(--mut);font-size:12px}
+.tags{display:flex;gap:5px;flex-wrap:wrap}
+.tag{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.tag.good{color:var(--ac);border-color:var(--ac)}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.score{margin-left:auto;font-weight:700;color:var(--ac)}
+.top{display:flex;gap:8px;align-items:baseline}
+.acts a,.acts button{font-size:12px;padding:4px 9px;border-radius:7px;border:1px solid var(--line);color:var(--tx);text-decoration:none;background:var(--bg)}
+.acts a:hover,.acts button:hover{border-color:var(--ac)}
+.acts{display:flex;gap:5px;flex-wrap:wrap}
+.card textarea{min-height:44px;font-size:12px}
+.empty{color:var(--mut);padding:60px 10px;text-align:center}
+@media (max-width:820px){body{grid-template-columns:1fr;display:block}aside,main{height:auto;border:0}}
+dialog{background:var(--panel);color:var(--tx);border:1px solid var(--line);border-radius:12px;padding:0;width:min(940px,96vw);max-height:92vh}
+dialog::backdrop{background:#000a}
+.dh{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.db{padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:18px;overflow:auto;max-height:78vh}
+@media (max-width:820px){.db{grid-template-columns:1fr}}
+#map{height:260px;border-radius:8px;border:1px solid var(--line)}
+#pv{width:100%;height:360px;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px}
+.db h2{margin-top:14px}.db label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+.card h3{cursor:pointer}.card h3:hover{color:var(--ac)}
+</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+</head>
+<body>
+<aside>
+  <h1>Разведка</h1>
+  <p class="hint">Ищет бизнесы в OpenStreetMap и показывает, кому нужен бот или мини-апп. Бесплатно, без ключей.</p>
+
+  <h2>Города и районы</h2>
+  <div class="row"><input id="cityIn" placeholder="Например, Обнинск" aria-label="Город"><button id="cityAdd" title="Добавить">+</button></div>
+  <div class="chips" id="cities" style="margin-top:8px"></div>
+  <p class="hint" style="margin-top:6px">Можно добавить «Москва», «Химки», «Мытищи», «Московская область».</p>
+
+  <h2>Категории</h2>
+  <div class="chips" id="cats"></div>
+
+  <h2>Источник и ключи</h2>
+  <select id="src" aria-label="Источник"><option value="osm">OpenStreetMap (бесплатно, без ключа)</option><option value="2gis">2ГИС (платный или пробный ключ)</option></select>
+  <input id="k2" type="password" placeholder="Ключ 2ГИС" style="margin-top:6px" aria-label="Ключ 2ГИС">
+  <input id="kg" type="password" placeholder="Ключ Gemini (для ИИ)" style="margin-top:6px" aria-label="Ключ Gemini">
+  <input id="gm" placeholder="Модель Gemini" style="margin-top:6px" aria-label="Модель Gemini">
+  <label class="hint" style="display:block;margin-top:6px"><input type="checkbox" id="rep" style="width:auto"> Повторять поиск, который был за 14 дней</label>
+  <input id="px" placeholder="Адрес прокси (Cloudflare Worker)" style="margin-top:6px" aria-label="Адрес прокси">
+  <p class="hint">Ключи и адрес прокси хранятся только в вашем браузере.</p>
+
+  <h2>Что предлагаем</h2>
+  <select id="offer" aria-label="Услуга">
+    <option value="bot">Telegram/VK/Max-бот</option>
+    <option value="mini">Telegram мини-апп</option>
+    <option value="site">Сайт</option>
+  </select>
+  <h2>Шаблон сообщения</h2>
+  <textarea id="tpl"></textarea>
+  <p class="hint">{name} подставится названием бизнеса. Правки сохраняются.</p>
+
+  <button class="pri" id="go" style="width:100%;margin-top:14px">Найти бизнесы</button>
+  <button id="stop" style="width:100%;margin-top:6px" hidden>Остановить</button>
+
+  <h2>База</h2>
+  <div class="row">
+    <button id="csv">Экспорт CSV</button>
+    <button id="enrAll">Собрать контакты с сайтов</button>
+    <button id="clear">Очистить</button>
+  </div>
+</aside>
+
+<main>
+  <div class="bar">
+    <input id="q" placeholder="Поиск по названию, адресу, телефону" aria-label="Поиск по базе">
+    <select id="fSite"><option value="">Сайт: любой</option><option value="no">Без сайта</option><option value="yes">С сайтом</option></select>
+    <select id="fContact"><option value="">Контакты: любые</option><option value="phone">Есть телефон</option><option value="soc">Есть соцсети</option></select>
+    <select id="fStatus"><option value="">Статус: любой</option><option value="new">Новые</option><option value="wrote">Написал</option><option value="replied">Ответил</option><option value="client">Клиент</option><option value="no">Отказ</option></select>
+    <select id="sort"><option value="score">Сначала лучшие</option><option value="name">По названию</option></select>
+  </div>
+  <p id="status" role="status"></p>
+  <div class="grid" id="list"></div>
+</main>
+
+<dialog id="dlg"><div class="dh"><b id="dt"></b><button id="dx">Закрыть</button></div><div class="db" id="dbody"></div></dialog>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const CATS={
+ "Кафе и рестораны":['["amenity"~"^(cafe|restaurant|fast_food|bar|pub)$"]',1],
+ "Салоны красоты":['["shop"~"^(beauty|hairdresser|cosmetics)$"]',3],
+ "Барбершопы":['["shop"="hairdresser"]["male"="yes"]',3],
+ "Ногти и косметология":['["shop"~"^(beauty|nail)$"]',3],
+ "Стоматологии":['["amenity"="dentist"]',3],
+ "Клиники":['["amenity"~"^(clinic|doctors)$"]',2],
+ "Фитнес и спорт":['["leisure"~"^(fitness_centre|sports_centre)$"]',3],
+ "Автосервисы":['["shop"="car_repair"]',2],
+ "Цветы":['["shop"="florist"]',2],
+ "Образование":['["amenity"~"^(language_school|music_school|driving_school|training)$"]',3],
+ "Ветеринарии":['["amenity"="veterinary"]',2],
+ "Отели":['["tourism"~"^(hotel|hostel|guest_house)$"]',1],
+ "Магазины":['["shop"~"^(clothes|shoes|gift|toys|books|jewelry)$"]',1]
+};
+const TPL={
+ bot:"Здравствуйте! Меня зовут ___. Заметил(а), что у «{name}» есть клиенты в мессенджерах. Делаю чат-ботов: запись, заказы и ответы на частые вопросы работают сами, 24/7. Могу показать пример под ваш бизнес. Интересно?",
+ mini:"Здравствуйте! Меня зовут ___. Делаю Telegram мини-приложения: каталог, запись и оплата прямо в мессенджере, без отдельного сайта. Для «{name}» могу собрать демо за пару дней. Показать?",
+ site:"Здравствуйте! Меня зовут ___. Увидел(а) «{name}» на карте, а сайта у вас нет. Делаю сайты для местного бизнеса: быстро и недорого. Могу прислать пример. Интересно?"
+};
+const ST={new:"Новый",wrote:"Написал",replied:"Ответил",client:"Клиент",no:"Отказ"};
+const $=s=>document.querySelector(s);
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
+const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+let cities=load("cities",["Обнинск"]),cats=load("cats",["Салоны красоты","Кафе и рестораны"]);
+let leads=load("leads",{}),tpls=load("tpls",{}),abort=false;
+
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function chips(){
+  $("#cities").innerHTML=cities.map((c,i)=>`<span class="chip on" data-c="${i}" tabindex="0">${esc(c)} ×</span>`).join("");
+  $("#cats").innerHTML=Object.keys(CATS).map(c=>`<span class="chip tag ${cats.includes(c)?"on":""}" data-k="${esc(c)}" tabindex="0">${esc(c)}</span>`).join("");
+}
+function addCity(){const v=$("#cityIn").value.trim();if(v&&!cities.includes(v)){cities.push(v);save("cities",cities);chips()}$("#cityIn").value=""}
+$("#cityAdd").onclick=addCity;
+$("#cityIn").onkeydown=e=>{if(e.key==="Enter")addCity()};
+document.addEventListener("click",e=>{
+  const c=e.target.closest("[data-c]"),k=e.target.closest("[data-k]");
+  if(c){cities.splice(+c.dataset.c,1);save("cities",cities);chips()}
+  if(k){const n=k.dataset.k;cats=cats.includes(n)?cats.filter(x=>x!==n):[...cats,n];save("cats",cats);chips()}
+});
+function loadTpl(){const o=$("#offer").value;$("#tpl").value=tpls[o]??TPL[o];render()}
+$("#offer").onchange=loadTpl;
+$("#tpl").oninput=()=>{tpls[$("#offer").value]=$("#tpl").value;save("tpls",tpls);render()};
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function geocode(name){
+  const r=await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=5&accept-language=ru&countrycodes=ru&q="+encodeURIComponent(name));
+  const j=await r.json();
+  return j.find(x=>x.osm_type==="relation")||null;
+}
+async function overpass(areaId,filters){
+  const body=filters.map(f=>`nwr${f}["name"](area.a);`).join("");
+  const q=`[out:json][timeout:60];area(${areaId})->.a;(${body});out center tags 800;`;
+  const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+  if(!r.ok)throw new Error("Overpass "+r.status);
+  return (await r.json()).elements;
+}
+function phoneNorm(p){
+  if(!p)return"";
+  const first=String(p).split(/[;,]/)[0];
+  let d=first.replace(/\D/g,"");
+  if(d.length===11&&d[0]==="8")d="7"+d.slice(1);
+  if(d.length===10)d="7"+d;
+  return d.length===11?d:"";
+}
+function soc(t){
+  const g=k=>t[k]||t["contact:"+k]||"";
+  return{tg:g("telegram"),vk:g("vk"),inst:g("instagram"),wa:g("whatsapp")};
+}
+function score(l){
+  let s=0;
+  if(!l.site)s+=3;
+  if(l.phone)s+=1;
+  if(l.soc.inst||l.soc.vk||l.soc.tg)s+=2;
+  if(!l.soc.tg)s+=1;
+  s+=l.w||0;if(l.booking)s-=2;
+  return s;
+}
+const S=Object.assign({src:"osm",k2:"",kg:"",gm:"gemini-2.5-flash",px:"",rep:false},load("set",{}));
+const done=load("done",{}),gc={};let lastErr="",CUR=null,MAP=null;
+function setUI(){["src","k2","kg","gm","px"].forEach(k=>{$("#"+k).value=S[k];$("#"+k).oninput=e=>{S[k]=e.target.value.trim();save("set",S)}});$("#rep").checked=S.rep;$("#rep").onchange=e=>{S.rep=e.target.checked;save("set",S)}}
+function mk(o){const l=Object.assign({status:"new",note:"",soc:{},phone:"",site:""},o);l.score=score(l);leads[l.id]=l}
+const TYPE={vkontakte:"vk",telegram:"tg",instagram:"inst",whatsapp:"wa"};
+async function d2gis(city,cat){
+  if(!S.k2)throw new Error("вставьте ключ 2ГИС в настройках слева");
+  let n=0;
+  for(let p=1;p<=5&&!abort;p++){
+    const u=`https://catalog.api.2gis.com/3.0/items?q=${encodeURIComponent(cat.toLowerCase()+" "+city)}&page=${p}&page_size=10&fields=items.point,items.contact_groups,items.address_name&key=${encodeURIComponent(S.k2)}`;
+    const j=await (await fetch(u)).json();
+    if(j.meta?.error)throw new Error("2ГИС: "+(j.meta.error.message||j.meta.code));
+    const its=j.result?.items;if(!its?.length)break;
+    for(const it of its){
+      const id="g"+it.id;if(leads[id]||!it.name)continue;
+      const o={id,name:it.name,city,addr:it.address_name||"",cat,w:CATS[cat][1],lat:it.point?.lat,lon:it.point?.lon,soc:{}};
+      for(const g of it.contact_groups||[])for(const c of g.contacts||[]){
+        if(c.type==="phone"&&!o.phone)o.phone=phoneNorm(c.value);
+        else if(c.type==="website"&&!o.site)o.site=c.value||c.text||"";
+        else if(TYPE[c.type])o.soc[TYPE[c.type]]=c.value||c.text||"";
+      }
+      mk(o);n++;
+    }
+    await sleep(400);
+  }
+  return n;
+}
+async function osm(city,cat){
+  if(!(city in gc)){gc[city]=await geocode(city);await sleep(1100)}
+  if(!gc[city])throw new Error(`не нашёл «${city}»`);
+  const [f,w]=CATS[cat];let n=0;
+  for(const e of await overpass(3600000000+Number(gc[city].osm_id),[f])){
+    const t=e.tags||{},id=e.type[0]+e.id;if(leads[id])continue;
+    mk({id,name:t.name,city,addr:[t["addr:street"],t["addr:housenumber"]].filter(Boolean).join(", "),cat,w,phone:phoneNorm(t.phone||t["contact:phone"]||t["contact:mobile"]),site:t.website||t["contact:website"]||t.url||"",soc:soc(t),lat:e.lat??e.center?.lat,lon:e.lon??e.center?.lon});n++;
+  }
+  return n;
+}
+async function run(){
+  if(!cities.length||!cats.length){$("#status").textContent="Выберите хотя бы один город и одну категорию.";return}
+  abort=false;lastErr="";$("#go").hidden=true;$("#stop").hidden=false;let added=0,skipped=0;
+  for(const city of cities)for(const cat of cats){
+    if(abort)break;
+    const key=[S.src,city,cat].join("|");
+    if(!S.rep&&done[key]&&Date.now()-done[key]<14*864e5){skipped++;continue}
+    $("#status").textContent=`${city}: ${cat}…`;
+    try{added+=await(S.src==="osm"?osm:d2gis)(city,cat);done[key]=Date.now();save("done",done);save("leads",leads);render()}
+    catch(err){lastErr=`Ошибка (${city}, ${cat}): ${err.message}. `;if(/ключ/.test(err.message))break;await sleep(2000)}
+    await sleep(800);
+  }
+  $("#go").hidden=false;$("#stop").hidden=true;save("leads",leads);
+  $("#status").textContent=`${lastErr}Готово. Новых: ${added}${skipped?`, пропущено уже искавшихся пар: ${skipped}`:""}.`;render();
+}
+$("#go").onclick=run;$("#stop").onclick=()=>{abort=true};
+
+async function gem(p){
+  if(!S.kg)throw new Error("вставьте ключ Gemini в настройках слева");
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.gm||"gemini-2.5-flash")}:generateContent`,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":S.kg},body:JSON.stringify({contents:[{parts:[{text:p}]}]})});
+  const j=await r.json();if(!r.ok)throw new Error(j.error?.message||r.status);
+  return (j.candidates?.[0]?.content?.parts||[]).map(x=>x.text).join("");
+}
+const offerName=()=>$("#offer").selectedOptions[0].textContent;
+function info(l){return `Бизнес: «${l.name}», ${l.cat}, ${l.city}. Сайт: ${l.site?"есть":"нет"}. Соцсети: ${Object.keys(l.soc).filter(k=>l.soc[k]).join(", ")||"не найдены"}.`}
+async function enrich(l){
+  if(!S.px)throw new Error("вставьте адрес прокси в настройках слева");
+  if(!l.site)throw new Error("у бизнеса нет сайта");
+  const u=/^https?:/.test(l.site)?l.site:"http://"+l.site;
+  const r=await fetch(S.px.replace(/\/$/,"")+"/?url="+encodeURIComponent(u));
+  const j=await r.json();if(j.error&&!j.ok){l.enriched=Date.now();throw new Error(j.error)}
+  if(!l.phone&&j.phones?.length)l.phone=phoneNorm(j.phones[0]);
+  for(const k of ["tg","vk","inst","wa","max"])if(j[k]&&!l.soc[k])l.soc[k]=j[k];
+  if(j.email)l.email=j.email;l.booking=!!j.booking;l.enriched=Date.now();l.score=score(l);
+}
+document.addEventListener("click",async e=>{
+  if(e.target.id==="enr"&&CUR){
+    const b=e.target,l=leads[CUR];b.disabled=true;b.textContent="Собираю…";
+    try{await enrich(l);save("leads",leads);openLead(CUR)}catch(x){b.disabled=false;b.textContent="Собрать контакты с сайта";$("#enrS").textContent=x.message}
+  }
+});
+$("#enrAll").onclick=async()=>{
+  if(!S.px){$("#status").textContent="Вставьте адрес прокси в настройках слева.";return}
+  const todo=Object.values(leads).filter(l=>l.site&&!l.enriched);
+  if(!todo.length){$("#status").textContent="Нет бизнесов с сайтом, у которых контакты ещё не собраны.";return}
+  abort=false;$("#stop").hidden=false;let ok=0,fail=0,i=0,err="";
+  for(const l of todo){
+    if(abort||fail>=3)break;i++;$("#status").textContent=`Собираю контакты: ${i} из ${todo.length}…`;
+    try{await enrich(l);ok++}catch(x){if(l.enriched)continue;fail++;err=x.message}
+    if(i%5===0){save("leads",leads);render()}
+    await sleep(300);
+  }
+  $("#stop").hidden=true;save("leads",leads);
+  $("#status").textContent=(fail>=3?`Остановился: ${err}. `:"")+`Готово. Обработано сайтов: ${ok}.`;render();
+};
+function openLead(id){
+  const l=leads[id];if(!l)return;if(MAP){MAP.remove();MAP=null}CUR=id;$("#dt").textContent=l.name;
+  const n=encodeURIComponent(l.name+" "+l.city),nm=encodeURIComponent(l.name),A=(h,t)=>`<a href="${h}" target="_blank" rel="noopener">${t}</a>`;
+  $("#dbody").innerHTML=`<div>
+    <div class="meta">${esc(l.city)}${l.addr?", "+esc(l.addr):""} · ${esc(l.cat)} · оценка ${l.score}</div>
+    <h2>Связаться</h2><div class="acts">${links(l)}</div>
+    ${l.site?`<div class="acts" style="margin-top:8px"><button id="enr">Собрать контакты с сайта</button><span id="enrS" class="meta">${l.enriched?"Уже собрано":""}</span></div>`:""}
+    <h2>Найти в сервисах</h2><div class="acts">${A("https://2gis.ru/search/"+n,"2ГИС")}${A("https://zoon.ru/search/?query="+n,"Zoon")}${A("https://www.google.com/maps/search/?api=1&query="+n,"Google Maps")}${A("https://yandex.ru/search/?text="+n+"+владелец","Яндекс: владелец")}</div>
+    <h2>Кто решает</h2><div class="acts">${A("https://www.rusprofile.ru/search?query="+nm,"Реестр юрлиц")}</div>
+    <label>Телефон (впишите, когда нашли в 2ГИС или Яндексе)</label><input data-f="phone" value="${l.phone?"+"+l.phone:""}" placeholder="+7 900 000-00-00">
+    <label>Имя</label><input data-f="owner" value="${esc(l.owner)}" placeholder="Например, Ольга">
+    <label>Роль</label><input data-f="role" value="${esc(l.role)}" placeholder="Владелец, управляющий">
+    <label>Личный контакт</label><input data-f="pc" value="${esc(l.pc)}" placeholder="+7… или @ник">
+  </div><div>
+    <div id="map"></div>
+    <h2>ИИ (${esc(offerName())})</h2>
+    <div class="acts"><button id="aiT">Написать текст</button><button id="aiM">Сделать макет</button></div>
+    <textarea id="aiOut" placeholder="Здесь появится текст"></textarea>
+    <iframe id="pv" sandbox title="Макет" hidden></iframe>
+  </div>`;
+  if(!$("#dlg").open)$("#dlg").showModal();
+  if(window.L&&l.lat){
+    MAP=L.map("map").setView([l.lat,l.lon],15);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap"}).addTo(MAP);
+    Object.values(leads).filter(x=>x.id!==id&&x.lat&&x.city===l.city).slice(0,80).forEach(x=>L.circleMarker([x.lat,x.lon],{radius:5}).bindTooltip(x.name).addTo(MAP));
+    L.marker([l.lat,l.lon]).addTo(MAP).bindPopup(esc(l.name)).openPopup();
+  }else $("#map").textContent="Нет координат или карта не загрузилась.";
+}
+function closeLead(){$("#dlg").close();if(MAP){MAP.remove();MAP=null}CUR=null;render()}
+$("#dx").onclick=closeLead;$("#dlg").addEventListener("cancel",e=>{e.preventDefault();closeLead()});
+async function ai(btn,fn){const t=btn.textContent;btn.textContent="Думаю…";btn.disabled=true;try{await fn()}catch(e){$("#aiOut").value="Ошибка: "+e.message}btn.textContent=t;btn.disabled=false}
+document.addEventListener("click",e=>{
+  const o=e.target.closest("[data-open]");if(o)openLead(o.dataset.open);
+  const l=leads[CUR];if(!l)return;
+  if(e.target.id==="aiT")ai(e.target,async()=>{$("#aiOut").value=await gem(`${info(l)} Напиши первое сообщение владельцу на русском, 3-4 коротких предложения, живым языком, без эмодзи и штампов. Предлагаем: ${offerName()}. Назови одну конкретную пользу именно для такого бизнеса и предложи показать пример. Без подписи. Верни только текст сообщения.`)});
+  if(e.target.id==="aiM")ai(e.target,async()=>{const h=await gem(`${info(l)} Сделай демо-макет для услуги «${offerName()}» одним HTML-файлом: весь CSS внутри, без внешних файлов, шрифтов и картинок, адаптивно. Для бота нарисуй экран чата мессенджера с примером диалога, для мини-аппа экран приложения с меню и кнопкой заказа или записи, для сайта первый экран с оффером и контактами. Используй название и реальные услуги этого бизнеса, цвета подбери под сферу. Верни только код HTML.`);const f=$("#pv");f.hidden=false;f.srcdoc=h.replace(/^\s*```(?:html)?\s*|\s*```\s*$/g,"");$("#aiOut").value="Макет готов, он показан ниже."});
+});
+document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.dataset?.open)openLead(e.target.dataset.open)});
+document.addEventListener("input",e=>{const f=e.target.dataset?.f;if(f&&CUR){const L=leads[CUR];L[f]=f==="phone"?phoneNorm(e.target.value):e.target.value;if(f==="phone")L.score=score(L);save("leads",leads)}});
+
+function msg(l){return $("#tpl").value.replaceAll("{name}",l.name)}
+function links(l){
+  const m=encodeURIComponent(msg(l)),a=[];
+  if(l.phone){
+    a.push(`<a href="https://t.me/+${l.phone}" target="_blank" rel="noopener">Telegram</a>`);
+    a.push(`<a href="https://wa.me/${l.phone}?text=${m}" target="_blank" rel="noopener">WhatsApp</a>`);
+    a.push(`<a href="viber://chat?number=%2B${l.phone}">Viber</a>`);
+    a.push(`<a href="tel:+${l.phone}">Позвонить</a>`);
+  }
+  if(l.soc.tg)a.push(`<a href="https://t.me/${esc(String(l.soc.tg).replace(/^.*t\.me\/|^@/,""))}" target="_blank" rel="noopener">TG-канал</a>`);
+  if(l.soc.vk)a.push(`<a href="${/^http/.test(l.soc.vk)?esc(l.soc.vk):"https://vk.com/"+esc(l.soc.vk)}" target="_blank" rel="noopener">VK</a>`);
+  else a.push(`<a href="https://vk.com/search?c%5Bq%5D=${encodeURIComponent(l.name+" "+l.city)}&c%5Bsection%5D=communities" target="_blank" rel="noopener">Найти VK</a>`);
+  if(l.soc.inst)a.push(`<a href="${/^http/.test(l.soc.inst)?esc(l.soc.inst):"https://instagram.com/"+esc(l.soc.inst)}" target="_blank" rel="noopener">Instagram</a>`);
+  if(l.soc.wa&&!l.phone)a.push(`<a href="https://wa.me/${esc(l.soc.wa)}?text=${m}" target="_blank" rel="noopener">WhatsApp</a>`);
+  if(l.soc.max)a.push(`<a href="${esc(l.soc.max)}" target="_blank" rel="noopener">Max</a>`);
+  if(l.email)a.push(`<a href="mailto:${esc(l.email)}">Почта</a>`);
+  a.push(`<a href="https://yandex.ru/maps/?text=${encodeURIComponent(l.name+" "+l.city)}" target="_blank" rel="noopener">Яндекс Карты</a>`);
+  a.push(`<button data-copy="${l.id}">Копировать текст</button>`);
+  return a.join("");
+}
+function render(){
+  const q=$("#q").value.toLowerCase(),fs=$("#fSite").value,fc=$("#fContact").value,ft=$("#fStatus").value;
+  let arr=Object.values(leads).filter(l=>{
+    if(q&&!(l.name+" "+l.addr+" "+l.city+" "+l.phone).toLowerCase().includes(q))return false;
+    if(fs==="no"&&l.site)return false;
+    if(fs==="yes"&&!l.site)return false;
+    if(fc==="phone"&&!l.phone)return false;
+    if(fc==="soc"&&!(l.soc.inst||l.soc.vk||l.soc.tg))return false;
+    if(ft&&l.status!==ft)return false;
+    return true;
+  });
+  arr.sort($("#sort").value==="name"?(a,b)=>a.name.localeCompare(b.name):(a,b)=>b.score-a.score);
+  const total=Object.keys(leads).length;
+  if(!$("#status").textContent.startsWith("Ищу")&&!/^.+: .+…$/.test($("#status").textContent))
+    $("#status").textContent=total?`Показано ${Math.min(arr.length,200)} из ${arr.length} (в базе ${total}).`:"";
+  if(!arr.length){$("#list").innerHTML=`<div class="empty">${total?"Ничего не подошло под фильтры.":"Добавьте города, выберите категории и нажмите «Найти бизнесы»."}</div>`;return}
+  $("#list").innerHTML=arr.slice(0,200).map(l=>`
+  <div class="card">
+    <div class="top"><h3 data-open="${l.id}" tabindex="0" role="button">${esc(l.name)}</h3><span class="score" title="Чем выше, тем нужнее бот">${l.score}</span></div>
+    <div class="meta">${esc(l.city)}${l.addr?", "+esc(l.addr):""} · ${esc(l.cat)}</div>
+    <div class="tags">
+      ${l.site?`<a class="tag" href="${esc(/^http/.test(l.site)?l.site:"http://"+l.site)}" target="_blank" rel="noopener">есть сайт</a>`:`<span class="tag good">без сайта</span>`}
+      ${l.phone?`<span class="tag">+${l.phone}</span>`:`<span class="tag warn">нет телефона</span>`}
+      ${(l.soc.inst||l.soc.vk)?`<span class="tag good">есть соцсети</span>`:""}
+      ${l.booking?`<span class="tag warn">есть онлайн-запись</span>`:""}
+    </div>
+    <div class="acts">${links(l)}</div>
+    <select data-st="${l.id}" aria-label="Статус">${Object.entries(ST).map(([k,v])=>`<option value="${k}" ${l.status===k?"selected":""}>${v}</option>`).join("")}</select>
+    <textarea data-note="${l.id}" placeholder="Заметка">${esc(l.note)}</textarea>
+  </div>`).join("");
+}
+document.addEventListener("change",e=>{
+  const s=e.target.dataset.st;if(s){leads[s].status=e.target.value;save("leads",leads)}
+});
+document.addEventListener("input",e=>{
+  const n=e.target.dataset.note;if(n){leads[n].note=e.target.value;save("leads",leads)}
+});
+document.addEventListener("click",async e=>{
+  const c=e.target.dataset.copy;
+  if(c){try{await navigator.clipboard.writeText(msg(leads[c]));e.target.textContent="Скопировано"}catch(x){e.target.textContent="Не удалось"}setTimeout(()=>e.target.textContent="Копировать текст",1500)}
+});
+["#q","#fSite","#fContact","#fStatus","#sort"].forEach(s=>$(s).addEventListener("input",render));
+$("#clear").onclick=()=>{if(confirm("Удалить всю базу?")){leads={};save("leads",leads);$("#status").textContent="";render()}};
+$("#csv").onclick=()=>{
+  const rows=[["Название","Город","Адрес","Категория","Телефон","Сайт","Instagram","VK","Telegram","Статус","Оценка","Заметка"]];
+  Object.values(leads).forEach(l=>rows.push([l.name,l.city,l.addr,l.cat,l.phone?"+"+l.phone:"",l.site,l.soc.inst,l.soc.vk,l.soc.tg,ST[l.status],l.score,l.note]));
+  const csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(";")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="leads.csv";a.click();
+};
+chips();setUI();loadTpl();
+</script>
+</body>
+</html>
