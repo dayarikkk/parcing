@@ -311,10 +311,15 @@ function txtPick(t){
 }
 async function vkDirect(l){
   const bad=e=>new Error(`VK ${e.method}: ${e.error_msg} (код ${e.error_code})${e.error_code===5?". Токен привязан к IP, получите его заново":""}`);
-  const s=await jsonp("groups.search",{q:l.name+" "+l.city,count:5});
-  if(s.error)throw bad({...s.error,method:"groups.search"});
-  const ids=(s.response?.items||[]).map(g=>g.id);if(!ids.length)return[];
-  await sleep(350);
+  const ids=[];
+  for(const q of [l.name+" "+l.city,l.name]){
+    const s=await jsonp("groups.search",{q,count:5});
+    console.log("VK groups.search",q,s);
+    if(s.error)throw bad({...s.error,method:"groups.search"});
+    for(const g of s.response?.items||[])if(!ids.includes(g.id))ids.push(g.id);
+    await sleep(350);
+  }
+  if(!ids.length)return[];
   const d=await jsonp("groups.getById",{group_ids:ids.join(","),fields:"contacts,site,city,description,status,members_count"});
   if(d.error)throw bad({...d.error,method:"groups.getById"});
   const arr=Array.isArray(d.response)?d.response:d.response?.groups||[];
@@ -353,7 +358,7 @@ document.addEventListener("click",async e=>{
 });
 $("#vkAll").onclick=async()=>{
   if(!S.px&&!S.vt){$("#status").textContent="Вставьте адрес прокси в настройках слева.";return}
-  const todo=Object.values(leads).filter(l=>!l.vkDone).sort((a,b)=>b.score-a.score).slice(0,100);
+  const todo=Object.values(leads).filter(l=>!l.vkDone||!l.vkc?.length).sort((a,b)=>b.score-a.score).slice(0,100);
   if(!todo.length){$("#status").textContent="Все бизнесы уже проверены в VK.";return}
   abort=false;$("#stop").hidden=false;let ok=0,found=0,fail=0,i=0,err="";
   for(const l of todo){
@@ -363,7 +368,7 @@ $("#vkAll").onclick=async()=>{
     await sleep(450);
   }
   $("#stop").hidden=true;save("leads",leads);
-  $("#status").textContent=(fail>=3?`Остановился: ${err}. `:"")+`Готово. Проверено: ${ok}, сообщества нашлись у ${found}. Теперь можно нажать «Собрать контакты с сайтов».`;render();
+  $("#status").textContent=(fail>=3?`Остановился: ${err}. `:"")+`Готово. Проверено: ${ok}, сообщества нашлись у ${found}. ${ok>=5&&!found?" Ни одного сообщества не нашлось: получите токен заново, а подробности смотрите в F12 → Console.":" Теперь можно нажать «Собрать контакты с сайтов»."}`;render();
 };
 function openLead(id){
   const l=leads[id];if(!l)return;if(MAP){MAP.remove();MAP=null}CUR=id;$("#dt").textContent=l.name;
