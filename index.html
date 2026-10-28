@@ -78,6 +78,7 @@ dialog::backdrop{background:#000a}
   <input id="gm" placeholder="Модель Gemini" style="margin-top:6px" aria-label="Модель Gemini">
   <label class="hint" style="display:block;margin-top:6px"><input type="checkbox" id="rep" style="width:auto"> Повторять поиск, который был за 14 дней</label>
   <input id="px" placeholder="Адрес прокси (Cloudflare Worker)" style="margin-top:6px" aria-label="Адрес прокси">
+  <input id="vt" type="password" placeholder="Токен VK (для поиска сообществ)" style="margin-top:6px" aria-label="Токен VK">
   <p class="hint">Ключи и адрес прокси хранятся только в вашем браузере.</p>
 
   <h2>Что предлагаем</h2>
@@ -196,9 +197,9 @@ function score(l){
   s+=l.w||0;if(l.booking)s-=2;
   return s;
 }
-const S=Object.assign({src:"osm",k2:"",kg:"",gm:"gemini-2.5-flash",px:"",rep:false},load("set",{}));
+const S=Object.assign({src:"osm",k2:"",kg:"",gm:"gemini-2.5-flash",px:"",vt:"",rep:false},load("set",{}));
 const done=load("done",{}),gc={};let lastErr="",CUR=null,MAP=null;
-function setUI(){["src","k2","kg","gm","px"].forEach(k=>{$("#"+k).value=S[k];$("#"+k).oninput=e=>{S[k]=e.target.value.trim();save("set",S)}});$("#rep").checked=S.rep;$("#rep").onchange=e=>{S.rep=e.target.checked;save("set",S)}}
+function setUI(){["src","k2","kg","gm","px","vt"].forEach(k=>{$("#"+k).value=S[k];$("#"+k).oninput=e=>{S[k]=e.target.value.trim();save("set",S)}});$("#rep").checked=S.rep;$("#rep").onchange=e=>{S.rep=e.target.checked;save("set",S)}}
 function mk(o){const l=Object.assign({status:"new",note:"",soc:{},phone:"",site:""},o);l.score=score(l);leads[l.id]=l}
 const TYPE={vkontakte:"vk",telegram:"tg",instagram:"inst",whatsapp:"wa"};
 async function d2gis(city,cat){
@@ -294,11 +295,47 @@ function applyVk(l,c,auto){
   for(const k of ["tg","wa","inst","max"])if(c[k]&&!l.soc[k])l.soc[k]=c[k];
   if(c.email&&!l.email)l.email=c.email;l.vkAuto=auto;l.score=score(l);
 }
+function jsonp(m,p){return new Promise((res,rej)=>{
+  const tk=(S.vt.match(/access_token=([^&\s]+)/)||[,S.vt])[1],cb="vkcb"+Math.random().toString(36).slice(2),sc=document.createElement("script");
+  const end=()=>{delete window[cb];sc.remove()};
+  window[cb]=d=>{end();res(d)};sc.onerror=()=>{end();rej(new Error("VK не ответил, проверьте интернет и токен"))};
+  sc.src="https://api.vk.com/method/"+m+"?"+new URLSearchParams({...p,access_token:tk,v:"5.199",callback:cb});document.head.appendChild(sc);
+})}
+const nz=t=>String(t||"").toLowerCase().replace(/ё/g,"е").replace(/[^a-zа-я0-9 ]/g," ").split(/\s+/).filter(x=>x.length>2);
+function sim(a,b){const A=new Set(nz(a)),B=new Set(nz(b));if(!A.size||!B.size)return 0;let c=0;for(const x of A)if(B.has(x))c++;return c/Math.min(A.size,B.size)}
+function txtPick(t){
+  const g=(re,pre)=>{const m=re.exec(t);return m?pre+m[1]:""};
+  return{phones:[...t.matchAll(/(?:\+7|\b8)[\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}/g)].map(m=>m[0].replace(/\D/g,"")),
+    tg:g(/(?:t|telegram)\.me\/([A-Za-z0-9_]{4,})/i,"https://t.me/"),wa:g(/wa\.me\/(\d{10,15})/i,""),
+    inst:g(/instagram\.com\/([A-Za-z0-9_.]{2,})/i,"https://instagram.com/"),max:g(/(?<![A-Za-z0-9.-])max\.ru\/([A-Za-z0-9_\-./]{3,})/i,"https://max.ru/")};
+}
+async function vkDirect(l){
+  const bad=e=>new Error(`VK ${e.method}: ${e.error_msg} (код ${e.error_code})${e.error_code===5?". Токен привязан к IP, получите его заново":""}`);
+  const s=await jsonp("groups.search",{q:l.name+" "+l.city,count:5});
+  if(s.error)throw bad({...s.error,method:"groups.search"});
+  const ids=(s.response?.items||[]).map(g=>g.id);if(!ids.length)return[];
+  await sleep(350);
+  const d=await jsonp("groups.getById",{group_ids:ids.join(","),fields:"contacts,site,city,description,status,members_count"});
+  if(d.error)throw bad({...d.error,method:"groups.getById"});
+  const arr=Array.isArray(d.response)?d.response:d.response?.groups||[];
+  return arr.map(g=>{
+    const p=txtPick([g.description,g.status,g.site].filter(Boolean).join(" "));
+    const ph=[...(g.contacts||[]).map(c=>(c.phone||"").replace(/\D/g,"")).filter(x=>x.length>=10),...p.phones];
+    const gc=g.city?.title||"",same=gc&&nz(gc).join(" ")===nz(l.city).join(" "),diff=gc&&!same;
+    return{url:"https://vk.com/"+(g.screen_name||"club"+g.id),name:g.name,members:g.members_count||0,city:gc,site:g.site||"",
+      phones:[...new Set(ph)].slice(0,3),tg:p.tg,wa:p.wa,inst:p.inst,max:p.max,email:(g.contacts||[]).map(c=>c.email).find(Boolean)||"",
+      match:Math.round((sim(l.name,g.name)+(same?.25:0)-(diff?.4:0))*100)/100};
+  }).sort((a,b)=>b.match-a.match);
+}
 async function vkFind(l){
-  if(!S.px)throw new Error("вставьте адрес прокси в настройках слева");
-  const r=await fetch(S.px.replace(/\/$/,"")+"/?vk="+encodeURIComponent(l.name)+"&city="+encodeURIComponent(l.city));
-  const j=await r.json();if(j.error)throw new Error(j.error);
-  l.vkc=(j.items||[]).slice(0,3);l.vkDone=Date.now();
+  let items;
+  if(S.vt)items=await vkDirect(l);
+  else{
+    if(!S.px)throw new Error("вставьте токен VK или адрес прокси в настройках слева");
+    const r=await fetch(S.px.replace(/\/$/,"")+"/?vk="+encodeURIComponent(l.name)+"&city="+encodeURIComponent(l.city));
+    const j=await r.json();if(j.error)throw new Error(j.error);items=j.items||[];
+  }
+  l.vkc=items.slice(0,3);l.vkDone=Date.now();
   if(l.vkc[0]&&l.vkc[0].match>=0.95&&!l.soc.vk)applyVk(l,l.vkc[0],true);
 }
 function vkList(l){
@@ -315,7 +352,7 @@ document.addEventListener("click",async e=>{
   }
 });
 $("#vkAll").onclick=async()=>{
-  if(!S.px){$("#status").textContent="Вставьте адрес прокси в настройках слева.";return}
+  if(!S.px&&!S.vt){$("#status").textContent="Вставьте адрес прокси в настройках слева.";return}
   const todo=Object.values(leads).filter(l=>!l.vkDone).sort((a,b)=>b.score-a.score).slice(0,100);
   if(!todo.length){$("#status").textContent="Все бизнесы уже проверены в VK.";return}
   abort=false;$("#stop").hidden=false;let ok=0,found=0,fail=0,i=0,err="";
