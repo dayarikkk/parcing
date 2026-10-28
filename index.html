@@ -104,7 +104,7 @@ dialog::backdrop{background:#000a}
 <main>
   <div class="bar">
     <input id="q" placeholder="Поиск по названию, адресу, телефону" aria-label="Поиск по базе">
-    <select id="fSite"><option value="">Сайт: любой</option><option value="no">Без сайта</option><option value="yes">С сайтом</option></select>
+    <select id="fSite"><option value="">Сайт: любой</option><option value="no">Сайта нет в базе</option><option value="yes">С сайтом</option></select>
     <select id="fContact"><option value="">Контакты: любые</option><option value="phone">Есть телефон</option><option value="soc">Есть соцсети</option></select>
     <select id="fStatus"><option value="">Статус: любой</option><option value="new">Новые</option><option value="wrote">Написал</option><option value="replied">Ответил</option><option value="client">Клиент</option><option value="no">Отказ</option></select>
     <select id="sort"><option value="score">Сначала лучшие</option><option value="name">По названию</option></select>
@@ -258,7 +258,7 @@ const offerName=()=>$("#offer").selectedOptions[0].textContent;
 function info(l){return `Бизнес: «${l.name}», ${l.cat}, ${l.city}. Сайт: ${l.site?"есть":"нет"}. Соцсети: ${Object.keys(l.soc).filter(k=>l.soc[k]).join(", ")||"не найдены"}.`}
 async function enrich(l){
   if(!S.px)throw new Error("вставьте адрес прокси в настройках слева");
-  if(!l.site)throw new Error("у бизнеса нет сайта");
+  if(!l.site)throw new Error("впишите сайт в поле выше");
   const u=/^https?:/.test(l.site)?l.site:"http://"+l.site;
   const r=await fetch(S.px.replace(/\/$/,"")+"/?url="+encodeURIComponent(u));
   const j=await r.json();if(j.error&&!j.ok){l.enriched=Date.now();throw new Error(j.error)}
@@ -292,8 +292,9 @@ function openLead(id){
   $("#dbody").innerHTML=`<div>
     <div class="meta">${esc(l.city)}${l.addr?", "+esc(l.addr):""} · ${esc(l.cat)} · оценка ${l.score}</div>
     <h2>Связаться</h2><div class="acts">${links(l)}</div>
-    ${l.site?`<div class="acts" style="margin-top:8px"><button id="enr">Собрать контакты с сайта</button><span id="enrS" class="meta">${l.enriched?"Уже собрано":""}</span></div>`:""}
-    <h2>Найти в сервисах</h2><div class="acts">${A("https://2gis.ru/search/"+n,"2ГИС")}${A("https://zoon.ru/search/?query="+n,"Zoon")}${A("https://www.google.com/maps/search/?api=1&query="+n,"Google Maps")}${A("https://yandex.ru/search/?text="+n+"+владелец","Яндекс: владелец")}</div>
+    <label>Сайт (впишите, если нашли сами)</label><input data-f="site" value="${esc(l.site)}" placeholder="https://…">
+    <div class="acts" style="margin-top:8px"><button id="enr">Собрать контакты с сайта</button><span id="enrS" class="meta">${l.enriched?"Уже собрано":""}</span></div>
+    <h2>Найти в сервисах</h2><div class="acts">${A("https://2gis.ru/search/"+n,"2ГИС")}${A("https://zoon.ru/search/?query="+n,"Zoon")}${A("https://www.google.com/maps/search/?api=1&query="+n,"Google Maps")}${A("https://yandex.ru/search/?text="+n+"+официальный+сайт","Яндекс: сайт")}${A("https://yandex.ru/search/?text="+n+"+владелец","Яндекс: владелец")}</div>
     <h2>Кто решает</h2><div class="acts">${A("https://www.rusprofile.ru/search?query="+nm,"Реестр юрлиц")}</div>
     <label>Телефон (впишите, когда нашли в 2ГИС или Яндексе)</label><input data-f="phone" value="${l.phone?"+"+l.phone:""}" placeholder="+7 900 000-00-00">
     <label>Имя</label><input data-f="owner" value="${esc(l.owner)}" placeholder="Например, Ольга">
@@ -324,7 +325,7 @@ document.addEventListener("click",e=>{
   if(e.target.id==="aiM")ai(e.target,async()=>{const h=await gem(`${info(l)} Сделай демо-макет для услуги «${offerName()}» одним HTML-файлом: весь CSS внутри, без внешних файлов, шрифтов и картинок, адаптивно. Для бота нарисуй экран чата мессенджера с примером диалога, для мини-аппа экран приложения с меню и кнопкой заказа или записи, для сайта первый экран с оффером и контактами. Используй название и реальные услуги этого бизнеса, цвета подбери под сферу. Верни только код HTML.`);const f=$("#pv");f.hidden=false;f.srcdoc=h.replace(/^\s*```(?:html)?\s*|\s*```\s*$/g,"");$("#aiOut").value="Макет готов, он показан ниже."});
 });
 document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.dataset?.open)openLead(e.target.dataset.open)});
-document.addEventListener("input",e=>{const f=e.target.dataset?.f;if(f&&CUR){const L=leads[CUR];L[f]=f==="phone"?phoneNorm(e.target.value):e.target.value;if(f==="phone")L.score=score(L);save("leads",leads)}});
+document.addEventListener("input",e=>{const f=e.target.dataset?.f;if(f&&CUR){const L=leads[CUR];L[f]=f==="phone"?phoneNorm(e.target.value):e.target.value;if(f==="site")L.enriched=0;if(f==="phone"||f==="site")L.score=score(L);save("leads",leads)}});
 
 function msg(l){return $("#tpl").value.replaceAll("{name}",l.name)}
 function links(l){
@@ -367,7 +368,7 @@ function render(){
     <div class="top"><h3 data-open="${l.id}" tabindex="0" role="button">${esc(l.name)}</h3><span class="score" title="Чем выше, тем нужнее бот">${l.score}</span></div>
     <div class="meta">${esc(l.city)}${l.addr?", "+esc(l.addr):""} · ${esc(l.cat)}</div>
     <div class="tags">
-      ${l.site?`<a class="tag" href="${esc(/^http/.test(l.site)?l.site:"http://"+l.site)}" target="_blank" rel="noopener">есть сайт</a>`:`<span class="tag good">без сайта</span>`}
+      ${l.site?`<a class="tag" href="${esc(/^http/.test(l.site)?l.site:"http://"+l.site)}" target="_blank" rel="noopener">есть сайт</a>`:`<span class="tag good" title="Сайта нет в базе карт, но его могли просто не указать">сайта нет в базе</span>`}
       ${l.phone?`<span class="tag">+${l.phone}</span>`:`<span class="tag warn">нет телефона</span>`}
       ${(l.soc.inst||l.soc.vk)?`<span class="tag good">есть соцсети</span>`:""}
       ${l.booking?`<span class="tag warn">есть онлайн-запись</span>`:""}
