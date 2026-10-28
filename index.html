@@ -96,6 +96,7 @@ dialog::backdrop{background:#000a}
   <h2>База</h2>
   <div class="row">
     <button id="csv">Экспорт CSV</button>
+    <button id="vkAll">Найти в VK</button>
     <button id="enrAll">Собрать контакты с сайтов</button>
     <button id="clear">Очистить</button>
   </div>
@@ -286,6 +287,46 @@ $("#enrAll").onclick=async()=>{
   $("#stop").hidden=true;save("leads",leads);
   $("#status").textContent=(fail>=3?`Остановился: ${err}. `:"")+`Готово. Обработано сайтов: ${ok}.`;render();
 };
+function applyVk(l,c,auto){
+  l.soc.vk=c.url;if(!l.phone&&c.phones?.length)l.phone=phoneNorm(c.phones[0]);
+  if(!l.site&&c.site){l.site=/^https?:/.test(c.site)?c.site:"http://"+c.site;l.enriched=0}
+  for(const k of ["tg","wa","inst","max"])if(c[k]&&!l.soc[k])l.soc[k]=c[k];
+  if(c.email&&!l.email)l.email=c.email;l.vkAuto=auto;l.score=score(l);
+}
+async function vkFind(l){
+  if(!S.px)throw new Error("вставьте адрес прокси в настройках слева");
+  const r=await fetch(S.px.replace(/\/$/,"")+"/?vk="+encodeURIComponent(l.name)+"&city="+encodeURIComponent(l.city));
+  const j=await r.json();if(j.error)throw new Error(j.error);
+  l.vkc=(j.items||[]).slice(0,3);l.vkDone=Date.now();
+  if(l.vkc[0]&&l.vkc[0].match>=0.95&&!l.soc.vk)applyVk(l,l.vkc[0],true);
+}
+function vkList(l){
+  if(!l.vkc)return"";
+  if(!l.vkc.length)return`<p class="meta">В VK ничего не нашлось.</p>`;
+  return`<h2>Сообщества VK</h2>`+l.vkc.map((c,i)=>`<div class="meta" style="margin-bottom:6px"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.name)}</a> · ${c.members} подписч.${c.city?" · "+esc(c.city):""} · совпадение ${Math.round(c.match*100)}%${c.phones?.length?" · +"+esc(c.phones[0]):""} <button data-pick="${i}">Это он</button></div>`).join("");
+}
+document.addEventListener("click",async e=>{
+  const p=e.target.dataset?.pick;
+  if(p!==undefined&&CUR){const l=leads[CUR];applyVk(l,l.vkc[+p],false);save("leads",leads);openLead(CUR)}
+  if(e.target.id==="vkOne"&&CUR){
+    const b=e.target,l=leads[CUR];b.disabled=true;b.textContent="Ищу…";
+    try{await vkFind(l);save("leads",leads);openLead(CUR)}catch(x){b.disabled=false;b.textContent="Найти в VK";$("#enrS").textContent=x.message}
+  }
+});
+$("#vkAll").onclick=async()=>{
+  if(!S.px){$("#status").textContent="Вставьте адрес прокси в настройках слева.";return}
+  const todo=Object.values(leads).filter(l=>!l.vkDone).sort((a,b)=>b.score-a.score).slice(0,100);
+  if(!todo.length){$("#status").textContent="Все бизнесы уже проверены в VK.";return}
+  abort=false;$("#stop").hidden=false;let ok=0,found=0,fail=0,i=0,err="";
+  for(const l of todo){
+    if(abort||fail>=3)break;i++;$("#status").textContent=`Ищу в VK: ${i} из ${todo.length}…`;
+    try{await vkFind(l);ok++;if(l.vkc.length)found++}catch(x){fail++;err=x.message}
+    if(i%5===0){save("leads",leads);render()}
+    await sleep(450);
+  }
+  $("#stop").hidden=true;save("leads",leads);
+  $("#status").textContent=(fail>=3?`Остановился: ${err}. `:"")+`Готово. Проверено: ${ok}, сообщества нашлись у ${found}. Теперь можно нажать «Собрать контакты с сайтов».`;render();
+};
 function openLead(id){
   const l=leads[id];if(!l)return;if(MAP){MAP.remove();MAP=null}CUR=id;$("#dt").textContent=l.name;
   const n=encodeURIComponent(l.name+" "+l.city),nm=encodeURIComponent(l.name),A=(h,t)=>`<a href="${h}" target="_blank" rel="noopener">${t}</a>`;
@@ -293,7 +334,8 @@ function openLead(id){
     <div class="meta">${esc(l.city)}${l.addr?", "+esc(l.addr):""} · ${esc(l.cat)} · оценка ${l.score}</div>
     <h2>Связаться</h2><div class="acts">${links(l)}</div>
     <label>Сайт (впишите, если нашли сами)</label><input data-f="site" value="${esc(l.site)}" placeholder="https://…">
-    <div class="acts" style="margin-top:8px"><button id="enr">Собрать контакты с сайта</button><span id="enrS" class="meta">${l.enriched?"Уже собрано":""}</span></div>
+    <div class="acts" style="margin-top:8px"><button id="enr">Собрать контакты с сайта</button><button id="vkOne">Найти в VK</button><span id="enrS" class="meta">${l.enriched?"Уже собрано":""}</span></div>
+    ${vkList(l)}
     <h2>Найти в сервисах</h2><div class="acts">${A("https://2gis.ru/search/"+n,"2ГИС")}${A("https://zoon.ru/search/?query="+n,"Zoon")}${A("https://www.google.com/maps/search/?api=1&query="+n,"Google Maps")}${A("https://yandex.ru/search/?text="+n+"+официальный+сайт","Яндекс: сайт")}${A("https://yandex.ru/search/?text="+n+"+владелец","Яндекс: владелец")}</div>
     <h2>Кто решает</h2><div class="acts">${A("https://www.rusprofile.ru/search?query="+nm,"Реестр юрлиц")}</div>
     <label>Телефон (впишите, когда нашли в 2ГИС или Яндексе)</label><input data-f="phone" value="${l.phone?"+"+l.phone:""}" placeholder="+7 900 000-00-00">
@@ -372,6 +414,7 @@ function render(){
       ${l.phone?`<span class="tag">+${l.phone}</span>`:`<span class="tag warn">нет телефона</span>`}
       ${(l.soc.inst||l.soc.vk)?`<span class="tag good">есть соцсети</span>`:""}
       ${l.booking?`<span class="tag warn">есть онлайн-запись</span>`:""}
+      ${l.vkAuto?`<span class="tag warn" title="Сообщество подобрано по названию, проверьте">VK найден автоматически</span>`:""}
     </div>
     <div class="acts">${links(l)}</div>
     <select data-st="${l.id}" aria-label="Статус">${Object.entries(ST).map(([k,v])=>`<option value="${k}" ${l.status===k?"selected":""}>${v}</option>`).join("")}</select>
